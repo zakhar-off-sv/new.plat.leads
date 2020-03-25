@@ -1,0 +1,43 @@
+up: docker-up
+down: docker-down
+restart: docker-down docker-up
+init: docker-down-clear project-clear docker-pull docker-build docker-up
+test: project-tests
+
+docker-up:
+	USER_ID=`id -u` GROUP_ID=`id -g` docker-compose up -d
+
+docker-down:
+	docker-compose down --remove-orphans
+
+docker-down-clear:
+	docker-compose down -v --remove-orphans
+
+docker-pull:
+	docker-compose pull
+
+docker-build:
+	USER_ID=`id -u` GROUP_ID=`id -g` docker-compose build
+
+project-init: project-composer-install project-wait-db project-ready
+
+project-clear:
+	docker run --rm -v ${PWD}/../../..:/var/www/app --workdir=/var/www/app alpine rm -f .ready
+
+project-composer-install:
+	docker-compose exec -T php-fpm composer install
+
+project-wait-db:
+	until docker-compose exec -T postgres pg_isready --timeout=0 --dbname=plat.leads ; do sleep 1 ; done
+
+project-migrations:
+	docker-compose exec -T php-fpm php bin/console doctrine:migrations:migrate --no-interaction
+
+project-fixtures:
+	docker-compose exec -T php-fpm php bin/console doctrine:fixtures:load --no-interaction
+
+project-ready:
+	docker run --rm -v ${PWD}/../../..:/var/www/app --workdir=/var/www/app alpine touch .ready
+
+project-tests:
+	docker-compose exec -T php-fpm php bin/phpunit

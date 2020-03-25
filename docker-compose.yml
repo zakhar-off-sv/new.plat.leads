@@ -1,0 +1,58 @@
+version: "3"
+services:
+    nginx:
+        build:
+            context: ./.docker/development
+            dockerfile: nginx.docker
+            args:
+                - NGINX_VERSION=${NGINX_VERSION}
+        container_name: ${PROJECT}-nginx
+        volumes:
+            - "$PWD/app:/var/www/app"
+        depends_on:
+            - phpfpm
+        ports:
+            - "${NGINX_PORT}:80"
+    phpfpm:
+        container_name: ${PROJECT}-phpfpm
+        build:
+            context: ./.docker/development
+            dockerfile: phpfpm.docker
+            args:
+                - PHPFPM_VERSION=${PHPFPM_VERSION}
+                - USER_ID
+                - GROUP_ID
+        volumes:
+            - "$PWD/app:/var/www/app:rw"
+        depends_on:
+            - postgres
+            - redis
+            - mailer
+    postgres:
+        image: postgres:${PGSQL_VERSION}-alpine
+        container_name: ${PROJECT}-postgres
+        volumes:
+            - "$PWD/.data/db/postgresql:/var/lib/postgresql/data"
+        environment:
+            POSTGRES_USER: ${PGSQL_USER}
+            POSTGRES_PASSWORD: ${PGSQL_PASSWORD}
+            POSTGRES_DB: ${PGSQL_DATABASE}
+        ports:
+            - "${PGSQL_PORT}:5432"
+    redis:
+        image: redis:${REDIS_VERSION}-alpine
+        container_name: ${PROJECT}-redis
+        volumes:
+            - "$PWD/.data/redis:/data"
+        command:
+            - 'redis-server'
+            - '--databases 2'
+            - '--save 900 1'
+            - '--save 300 10'
+            - '--save 60 10000'
+            - '--requirepass secret'
+    mailer:
+        image: mailhog/mailhog
+        container_name: ${PROJECT}-mailer
+        ports:
+            - "${MAILHOG_PORT}:8025"
