@@ -5,6 +5,7 @@
         "php": "^7.2.5",
         "ext-ctype": "*",
         "ext-iconv": "*",
+        "finesse/swiftmailer-defaults-plugin": "^2.0",
         "ramsey/uuid": "^4.0",
         "symfony/console": "5.0.*",
         "symfony/dotenv": "5.0.*",
@@ -12,6 +13,7 @@
         "symfony/framework-bundle": "5.0.*",
         "symfony/monolog-bundle": "^3.5",
         "symfony/orm-pack": "^1.0",
+        "symfony/swiftmailer-bundle": "^3.4",
         "symfony/yaml": "5.0.*",
         "webmozart/assert": "^1.7"
     },
