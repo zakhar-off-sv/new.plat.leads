@@ -44,13 +44,13 @@ services:
         container_name: ${PROJECT}-redis
         volumes:
             - "$PWD/.data/redis:/data"
+        environment:
+            - REDIS_PASSWORD=${REDIS_PASSWORD}
+        ports:
+            - "${REDIS_PORT}:6379"
         command:
             - 'redis-server'
-            - '--databases 2'
-            - '--save 900 1'
-            - '--save 300 10'
-            - '--save 60 10000'
-            - '--requirepass secret'
+            - '--requirepass ${REDIS_PASSWORD}'
     mailer:
         image: mailhog/mailhog
         container_name: ${PROJECT}-mailer
