@@ -1,0 +1,583 @@
+
+
+
+    Стек технологий
+        - symfony
+        - doctrine
+        - postgreSQL
+        - RabbitMQ or Kafka or Redis pub/sub
+        - Redis
+
+    тесты
+        - unit
+        - functional
+        - behat
+
+    информирование
+        - почта
+        - sms
+
+    geo (USA)
+        - state
+        - zip
+        - zip boundary
+
+    helpers
+        - bank routing numbers -> bank name + phone
+
+    Authorization
+        - https://packagist.org/packages/league/oauth2-server
+
+    Modules
+        - import/export (core) "прием и продажа lead-а"
+        - view "API for React frontend"
+        - scoring
+
+    Time Zone
+
+    Roles
+        - http://test.dot818.com/AddRole
+
+
+========================================================================================================================
+
+SubProduct - схема лида, спецификация
+MinPrice - минимальная цена, которую необходимо выплатить аффилиату
+ID - идентификатор лида (используем UUID)
+Статусы:
+ - sold
+ - reject
+ - priceReject
+ - error
+
+Прием/сохранение лида
+
+1. аутентификация канала аффилиата (oAuth2)
+    - три источника траффика: api, referral, form
+    - список полей и "duplicate" поля конфигурируются в "SubProduct-е", для каждого "SubProduct-а" есть свои каналы аффилиатов
+    - необходима возможность добавить новое поле в "SubProduct" (менять нет необходимости, нужно на 100% быть уверенным что
+    zip это zip, а не что-то другое)
+    - необходимо логировать изменения в "SubProduct-e"
+2. Получение/маппинг данных
+    - необходимо иметь возможность работать с разными схемами данных - json, xml, POST, ...
+    - возможность получать неполный объем информации, а недостающее "хардкодить"
+3. Преобразование данных
+    - необходимо применять фильтры для значений полей лида (управление в "SubProduct-е")
+        например:
+        * вырезаем ненужные символы из аттрибутов
+        * заменяем некорректные домены в поле email
+        * ...
+    - если мы что-то меняем мы должны логировать оригинальные значения (нужны только для view)
+4. Валидация
+    - правила `required` берем из SubProduct-а
+    - правила (тип данных, размер, ...) хардкод (т.е. они не меняются)
+    - связанные поля
+    - если валицацию не прошли, необходимо логирование
+5. Необходим аукцион, т.е. у лида должна быть минимальная цена продажи с возможностью понижения (250 -> 0), понижение
+возможно только для не проданных лидов
+    варианты понижения цены "minPrice":
+    - получаем "ID" и новый MinPrice ("ID" должны отдать в "Reject" or "PriceReject" ответе)
+    - по "duplicate" аттрибутам ищем дубликат за 3 минуты ("duplicate" аттрибуты управление в SubProduct-е, ВАЖНО они могут
+    измениться в процессе работы системы)
+
+    workflow:
+    * если нет "MinPrice", то аукцион не работает (игнорируем проверки duplicate 3min, и заводим новый lead)
+    * если "MinPrice" больше предыдущего, то заводим новый "ID" (lead)
+    * если "MinPrice" равен предыдущему, то отвечаем "Error" + логируем
+
+6. Сохранение в хранилище (ОТ АДМИНА - update-ы запрещены)
+    *** Поиск нужен по ВСЕМ полям (ЗАКАЗЧИК)
+
+========================================================================================================================
+
+                        Auth
+    Request             -> isAuth($request): bool                   - false ->  Response (error)
+
+                                    |
+
+                        RequestConverter
+                        -> convert($request): Command               - exception ->  Response (error)
+
+                                    |
+
+                        Filter
+                        -> process($command): Command
+
+                                    |
+
+                        Validation
+                        -> isValid($command): bool                   - false -> getErrors(): array -> Response (error)
+
+                                    |
+
+                        LeadManager
+                        -> build($command): Lead
+
+                                    |
+
+                        Auction
+                        /* @return Lead либо тот который пришел, либо уже существующий с какими-то изменениями  */
+                        -> run($lead): Lead
+
+                                    |
+                                                                    no
+                        Если lead не изменился после ау аукциона? - - - -
+
+                                    |                                    |
+
+                        Repository                                       |
+                        -> add($lead): void                              |
+
+                                    |                                    |
+                                          - - - - - - - - - - - - - - - -
+                        Flusher
+                        -> flush(): void
+
+                                    |
+
+                        Response (success)
+
+
+========================================================================================================================
+
+
+    SubProduct
+        id
+        name
+        fields
+            Field
+                enabled
+                required
+                label
+                description
+        ?duplicateFields
+
+    AffiliateChannel
+        id
+        SubProduct
+        authInfo
+        name
+        ...
+
+    Lead
+        id
+        affiliateChannel -> SubProduct
+        date
+        fields
+            Field
+                label
+                originalValue (если что-то преобразовали)
+                value
+
+
+========================================================================================================================
+
+
+
+    Сохранение/импорт lead-а
+        1. аутентификация канала аффилиата (oAuth)
+        2. Получение/маппинг данных (продумать возможность менять схему данных)
+        3. Обработка данных
+
+            + Новый lead:
+                1. Фильтруем ненужные значения
+                    - применяем `enabled` из SubProduct-а
+                2. Преобразование данных
+                    - к примеру:
+                        * вырезаем ненужные символы из аттрибутов
+                        * заменяем некорректные домены в поле email
+                        * ...
+                3. Валидация
+                    - правила `required` берем из SubProduct-а
+                    - правила (тип данных, размер, ...) хардкод (т.е. они не меняются)
+            + Понижение minPrice
+                1. получаем UUID и новый MinPrice
+                or
+                2. По `duplicate` аттрибутам ищем дубликат за 3 минуты
+                    - `duplicate` аттрибуты конфигурируются тут: http://test.dot818.com/EditProduct.php
+
+                      ???
+                      # тут нужно придумать как идентифицировать лид по его аттрибутам (во многих хранилищах нужен
+                      именно этот идентификатор)
+                        *** DUPLICATE аттрибуты могут меняться ***
+
+                      добавляем 3 аттрибута для хранение hash-ей
+                      т.е. выбрали ssn, email, phone - эти три поля hash-ируются
+                      ???
+
+        4. Сохранение в хранилище (update-ы запрещены)
+            - нужно сохранить:
+                * аттрибуты + affiliate
+                * minPrice
+                * response
+
+        5. Тестовый режим (статус affiliate-а и channel-а, поле test в lead-е)
+        6. Применяем `black` фильтры для принятия решения: возможность продавать lead
+
+
+    Продажа/Export lead-а
+
+        Regular
+            1. Выбор buyer channels set-a для продажи (manual, automatic)
+            2. Mapping/transformation + validation + filtering lead-a в buyer channel
+                ! продаем последовательнно, есть max time на время отработки
+                    - 2 режима работы (timeout response): продолжаем ждать ответ, ответ игнорируем
+                  в случае успешного ответа от channel продажу прекращаем
+
+                features
+                    - свой price reject ответ
+                    - price reject (bid amount)
+                    - подхватывать timeout sales
+                    - ранняя продажа
+                    - I settings
+                    - double sale
+                    - ...
+
+        Data Gates - тут можно экспериментировать (отправлять все сразу, но захотят какие-то ротации)
+
+        Pixel - суть дернуть некий url при некоторых событиях (post, sold, ...)
+
+
+
+========================================================================================================================
+
+
+
+    SubProduct
+        - http://test.dot818.com/AddProduct
+    Affiliate
+        - http://test.dot818.com/AddAffiliate_general
+    Affiliate Channel
+        - http://test.dot818.com/AddAffiliate_channels_add
+
+    Black Lists (* Возможно необходимо давать вести списки по всем `enabled` аттрибутам *)
+        - http://test.dot818.com/EditProduct.php (управление)
+        - http://test.dot818.com/BlackListIP
+        - Black SSN
+        - Black Ref URL
+        - Black email domain
+        - Black employer
+        - Black occupation
+        - Black state
+
+    Buyer
+        - http://test.dot818.com/buyers_general
+    Buyer Channel
+        - http://test.dot818.com/buyers_channels_general?create=1
+    Set
+        - http://test.dot818.com/ProductsSetsList
+
+    Lead (all attributes) - список нужно проработать и подтвердить + n доп. полей
+        # PERSONAL DETAILS - группа для удобства восприятия
+              First Name
+              Last Name
+              Date of Birth
+              Military status
+              SSN
+              Length At Address
+              Rent or Own
+              ZIP
+              City
+              State
+              Address
+              Email
+              Home Phone
+              Mobile Phone
+              Cell Phone
+              Contact Time
+              DL state
+              DL Number
+              Do you own a car
+              Citizenship
+              Residence Payment
+              Reasons
+              Debt details
+              Credit Score
+        # VEHICLE INFORMATION
+              Year
+              Make
+              Model
+              Style
+              Mileage
+              Is vehicle paid off
+              Vehicle Price
+              Amount Owed
+        # EMPLOYMENT INFORMATION
+              Income Source
+              Time Employed
+              Job Title
+              Current Employer
+              Employer's Phone
+              Net monthly income
+              How often is paid
+              Next Pay Date
+              Second Pay Date
+              Bankruptcy
+        # BANKING INFORMATION
+              Bank Name
+              Months At Bank
+              Bank Phone
+              Direct Deposit
+              Account Type
+              Account Number
+              Routing/ABA Number
+        # OTHERS
+              Sub ID
+              Sub ID 2
+              Sub ID 3
+              Sub ID 4
+              Sub ID 5
+              Referring URL
+
+
+========================================================================================================================
+
+
+    Import
+        Request
+            -> Auth "affiliate channel"                                 -> Response (forbidden)
+                -> Command (DTO) "json -> object"
+
+                    [new]
+                        -> Clean unused attrs
+                            -> Transform attrs
+                                -> Validate                             -> Response (error)
+                                    -> Save "new Lead && save"
+                    [addMinPrice]
+                                -> Validate
+                                    -> Save "getLead"
+
+                    -> Add MinPrice
+                        -> Test mode                                    -> Response (sold/reject/price reject)
+                            -> Black lists filters                      -> Response (reject)
+                                -> Run Export                           -> Response (sold/reject/price reject)
+
+    Export
+        Request (Lead)
+            -> Find Set                                                 -> Response (reject)
+                -> Buyer channel loop                                   -> Response (sold/reject/price reject)
+                                                                           "if first sold or all reject"
+
+
+
+========================================================================================================================
+
+
+
+    Dependencies
+
+        Company "? важно чтобы хранилища компаний не пересекались"
+
+            #module name
+                #entity name
+
+            User
+                User
+                    id
+                    date
+                    email
+                    passwordHash
+                    role
+                    status
+
+            Note
+                id
+                date
+                entity
+                    type
+                    id
+                text
+                files -> * File
+                    id
+                    Note
+                    date
+                    info
+                        path
+                        name
+                        size
+
+            Contact
+                id
+                role [owner, director, manager]
+                entity
+                    type
+                    id
+                name
+                    first
+                    last
+                email
+                contact
+                    phone
+                    skype
+                    facebook
+                    viber
+                    aim
+                    icq
+
+            Core
+                Product
+                SubProduct
+                    id
+                    Product
+                    name
+                    description
+                    setOfFields
+                    status [active, hidden]
+                Affiliate
+                    id
+                    name
+                        company
+                        display
+                    address
+                        country
+                        zipRegionCity
+                        address
+                    website
+                    status [new, test, active, pause, blocked, hidden]
+                AffiliateChannel
+                    id
+                    Affiliate
+                    SubProduct
+                    name
+                    type [api, form, referral]
+                    status [active, pause, hidden]
+                Lead
+                    id
+                    date
+                    SubProduct
+                    AffiliateChannel
+                    ...attributes
+                    MinPrice
+                        id
+                        Lead
+                        amount
+                        date
+                        Response
+                            id
+                            MinPrice
+                            status [sold, reject, priceReject]
+                            date
+                            workingTime
+                            price
+                            redirect
+                    Click
+                        id
+                        Lead
+                        ip
+                        date
+                        clickTime
+                        useragent
+                Buyer
+                BuyerChannel
+                    Buyer
+                    SubProduct
+                Set
+                    SubProduct
+
+
+    $lead = new Lead();
+    $lead->addMinPrice();
+    $lead->getMinPriceList()->last()->addResponse();
+    $lead->addClick();
+
+
+
+========================================================================================================================
+
+
+
+    Правила:
+        Сохранение лида
+            1. Максимальный minPrice $250
+            2. Если нашли дубликат c большим minPrice за 3 минуты и он еще работает, то отвечаем "This lead is still under processing"
+                - в идеале Давид хотел завершать предыдущий MinPrice и продавать новый лид
+            3. Если нашли дубликат c большим minPrice за 3 минуты и он в статусе sold, то отвечаем "This lead was already sold"
+            4. Если нашли дубликат c меньшим minPrice за 3 минуты, то заводим новый лид
+            5. Если нашли дубликат c таким же minPrice за 3 минуты, то отвечаем "The same min price has already been posted on this channel in the last 3 minutes"
+            6. Если лид непроходит валидацию, то возвращает список ошибок
+            7. Секретные поля (ssn, driver license, account number) не должны попадать вв хранилище в открытом виде
+            7. Если лид проходит валидацию, то сохраняем его
+            8. Если проходят фильтры "System Black lists" и "Aff Black lists", то запускаем продажу
+            9. Если истек TimeOut, то отвечаем "reject"
+            10. Если лид продали, то отвечаем "sold" + price + redirect
+            11. [optional] Если лид не продали и во время продажи подобрали канал который `теоритечески` купит лид со следующем minPrice, то отвечаем "PriceReject"
+            12. Если лид не продали, то отвечаем "reject"
+            + Тестовый режим работы
+
+
+
+    Фичи:
+        Import (Affiliate)
+            1. Источники трафика (api, form, referral) + возможность добавить transformer *required*
+            2. Преобразование полей лида
+                - Next/Second paydays
+                - Driver's License Changes
+                - Incorrect GeoData
+                - Military status changes
+                - Исправление ошибок, замена недопустимых символов
+            3. HardCode [channel settings]
+                - RLA
+                - MinPrice
+            4. Two step redirect (Default, SMS optin, SMS optin & Offerwall) [affiliate settings]
+            5. TimeOut, TimeOut (Sa, Su) - максимальное время обработки лида [affiliate/channel settings]
+                режимы:
+                    - без TimeOut
+                    - c TimeOut, по стечению прекращаем продажу и отдаем ответ
+                    - c TimeOut, по стечению отдаем ответ продалжаем продажу (в случае sold sysProfit = moneyMade)
+            6. Post to data gates (async) [affiliate settings]
+                - post all data
+                - post only sold
+                - don`t post
+            7. Credits lead *required*
+            8. White IP list [affiliate settings] *required*
+            9. Ы settings [channel settings]
+            10. Black Lists [channel settings]
+                - sub id
+                - sub id mask
+                - occupations
+            11. PriceReject mode [channel settings]
+            12. Freeze [channel settings]
+            13. Send to standard set if post to "storefronts" was rejected or some trouble [channel settings]
+            14. Pixel
+            15. Информирование (email):
+                - credit
+                - redirect rate
+                - suppression list
+            16. Additional earning -> Referral Affiliates [affiliate settings]
+            17. Contacts
+            18. Notes
+            19. Bulk changes
+            20. Redirect Up
+            21. Дубликаты по периодам
+            22. Оплата за клики или за лид
+
+        Export (Buyer)
+            1. Confirmation page на нашей стороне
+            2. Режимы продажи лида:
+                - sync
+                - async (сразу всем, sold если накапливаем определенную сумму, иначе credit-уем все продажи)
+            3. PriceReject (BidAmount)
+            4. Advance sale (когда заранее продаем лид в более дешевый канал и начинаем работать по схеме PriceReject)
+            5. Delay Submission
+            6. Sub set (rotation)
+            7. FixedTier
+            8. Double sale
+            9. TimeOut
+            10. Sort storefront (distance)
+            11. Отправка только в storefront каналы
+            12. Подхватываем TimeOut продажи
+            13. Affiliate Buyer Set
+            14. Фильтры - выбор подходящик каналов для лида
+            15. Дубликаты
+            16. DNP - списки которые предоставляют байеры (ftp)
+            17. Scoring + set sort by scoring
+            18. SubId, SubId + AffSubId
+            19. Информирование (email, sms):
+                - new lead
+                - cap
+            20. Contacts
+            21. Notes
+            22. Bulk changes
+
+
+        1. Продажа в `data` каналы
