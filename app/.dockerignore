@@ -9,3 +9,13 @@
 /var/
 /vendor/
 ###< symfony/framework-bundle ###
+
+###> symfony/phpunit-bridge ###
+/.phpunit
+/.phpunit.result.cache
+/phpunit.xml
+###< symfony/phpunit-bridge ###
+
+###> friends-of-behat/symfony-extension ###
+/behat.yml
+###< friends-of-behat/symfony-extension ###
